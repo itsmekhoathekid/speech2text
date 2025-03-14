@@ -1,0 +1,4 @@
+HyperPyYAML==1.1.0
+numpy==1.23.5
+speechbrain==0.5.15
+torch==1.13.1
