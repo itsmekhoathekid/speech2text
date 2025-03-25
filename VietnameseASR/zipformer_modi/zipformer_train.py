@@ -9,7 +9,23 @@ import speechbrain as sb
 import json
 import re
 from hyperpyyaml import load_hyperpyyaml
-from speechbrain.utils.distributed import run_on_main
+
+
+
+
+
+project_paths = [
+    "/data/npl/Speech2Text/icefall/egs/librispeech/ASR/pruned_transducer_stateless7",
+    "/data/npl/Speech2Text/icefall",
+    "/data/npl/Speech2Text/icefall/icefall",
+    "/data/npl/Speech2Text/VietnameseASR-main",  # thêm dòng này ở đây
+]
+for path in project_paths:
+    if path not in sys.path:
+        sys.path.append(path)
+
+import faulthandler
+faulthandler.enable()
 
 import torch
 import torch.nn as nn
@@ -79,12 +95,12 @@ def compute_tokens_lens(tokens):
 class ASR(sb.core.Brain):
     def compute_forward(self, batch, stage):
         batch = batch.to(self.device)
-
+        
         feats, l = batch['features'] # MFCC
         tokens_bos, _ = batch.tokens_bos # <S> A B C D E F
         # feat_lengths = batch['feat_length']
         # script_lengths = batch['target_length']
-        
+
         current_epoch = self.hparams.epoch_counter.current # Epoch hiện tại
         feats = self.modules.normalize(feats, l, epoch=current_epoch)
 
@@ -92,8 +108,7 @@ class ASR(sb.core.Brain):
             if hasattr(self.hparams, "augmentation"):
                 feats = self.hparams.augmentation(feats, l)
         
-        # forward modules
-        src = self.modules.CNN(feats) # CNN
+        src = feats
         enc_out, pred = self.modules.model(
             src, tokens_bos, l, pad_idx=pad_token,
         ) # encoder and decoder outputs
@@ -318,12 +333,22 @@ def get_dataset(path, shuffle):
         dataset = sb.dataio.dataset.DynamicItemDataset(shuffled_data)
     else:
         dataset = sb.dataio.dataset.DynamicItemDataset(data)
-
+    
     dataset.add_dynamic_item(parse_characters)
     dataset.set_output_keys(['id','features', 'encoded_text', 'tokens_bos', 'tokens_eos', 'feat_length', 'target_length'])
     return dataset
 
 # override
+# override
+overrides = {
+    'output_neurons': len(word2index),
+    'bos_index': sos_token,
+    'eos_index': eos_token,
+    'pad_index': pad_token
+}
+
+
+
 overrides = {
     'output_neurons': len(word2index),
     'bos_index': sos_token,
@@ -353,9 +378,9 @@ def get_hparams():
 
 from tqdm import tqdm
 if __name__ == "__main__":
-
     hparams = get_hparams()
 
+    print("wtf")
     asr_brain = ASR(
         modules=hparams["modules"],
         opt_class=hparams["Adam"],
@@ -367,6 +392,7 @@ if __name__ == "__main__":
         checkpointer=hparams["checkpointer"],
     )
 
+    
     train_dataloader_opts = hparams["train_dataloader_opts"]
     valid_dataloader_opts = hparams["valid_dataloader_opts"]
 

@@ -282,7 +282,7 @@ class ASR(sb.core.Brain):
 def parse_characters(path, text):
     sig  = sb.dataio.dataio.read_audio(f"{hparams['dataset_dir']}/{path}")
     features = hparams['compute_features'](sig.unsqueeze(0)).squeeze(0) # Đọc MFCC
-
+    
     yield features
     
     # t = re.sub(r"[^\w\s]", ' ', text.lower()).strip()
@@ -312,8 +312,8 @@ def get_dataset(path, shuffle):
         shuffled_data = {}
         for key in keys:
             shuffled_data[key] = data[key]
-
         dataset = sb.dataio.dataset.DynamicItemDataset(shuffled_data)
+
     else:
         dataset = sb.dataio.dataset.DynamicItemDataset(data)
 

@@ -248,10 +248,11 @@ class VGGTransformerEncoderDecoder(nn.Module):
     def forward(self, src, tgt, wav_len, pad_idx=0):
 
         # Nếu src có 4 chiều (B, T, C, F), cần hoán vị lại
-        bsz, max_seq_len, _ = src.size()
-        src = src.view(bsz, max_seq_len, self.in_channels, self.input_dim)
-        src = src.transpose(1, 2).contiguous() # B C T F
-
+        # bsz, max_seq_len, _ = src.size()
+        # src = src.view(bsz, max_seq_len, self.in_channels, self.input_dim)
+        # src = src.transpose(1, 2).contiguous() # B C T F
+        src = src.unsqueeze(2)
+        src = src.transpose(1, 2).contiguous()
         
         for layer_idx, layer in enumerate(self.conv_layers_dec_enc):
             src = layer(src)
@@ -369,10 +370,13 @@ class VGGTransformerEncoderDecoder(nn.Module):
         encoder_out : torch.Tensor
         """
         # reshape the src vector to [Batch, Time, Fea] if a 4d vector is given
-        bsz, max_seq_len, _ = src.size()
-        src = src.view(bsz, max_seq_len, self.in_channels, self.input_dim)
-        src = src.transpose(1, 2).contiguous() # B C T F
+        # bsz, max_seq_len, _ = src.size()
+        # src = src.view(bsz, max_seq_len, self.in_channels, self.input_dim)
+        # src = src.transpose(1, 2).contiguous() # B C T F
         
+        src = src.unsqueeze(2)
+        src = src.transpose(1, 2).contiguous()
+
         for layer_idx, layer in enumerate(self.conv_layers_dec_enc):
             src = layer(src)
 

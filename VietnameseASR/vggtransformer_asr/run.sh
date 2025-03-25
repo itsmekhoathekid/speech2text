@@ -1,10 +1,12 @@
 #!/bin/bash
-#SBATCH --job-name=vgg_trans
-#SBATCH -o /data/npl/Speech2Text/train_out/vgg_%j.out  # Tạo file log với ID job để dễ theo dõi
-#SBATCH --gres=gpu:1
-#SBATCH -N 1 # số lượng node để chạy
+#SBATCH --job-name=vgg
+#SBATCH -o /data/npl/Speech2Text/train_out/vgg_%j.out
+#SBATCH --gres=gpu:a100:1
+#SBATCH -N 1           # Số lượng node để chạy
+#SBATCH --ntasks=1
+#SBATCH --ntasks-per-node=1
 #SBATCH --cpus-per-task=2
-#SBATCH --mem=30G
+#SBATCH --mem=50G
 
 
 

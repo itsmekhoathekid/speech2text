@@ -189,7 +189,7 @@ class VGGTransformerEncoderDecoder(nn.Module):
         self.in_channels = in_channels
         self.input_dim = input_feat_per_channel
         self.pooling_kernel_sizes = []
-
+        
         # ====== Encoder VGG Blocks ======
         for _, config in enumerate(vggblock_config_enc):
             out_channels, conv_kernel_size, pooling_kernel_size, num_conv_layers, layer_norm = config # (32, 3, 1, 1, True)
@@ -254,10 +254,15 @@ class VGGTransformerEncoderDecoder(nn.Module):
         # x = src_tokens.view(bsz, max_seq_len, self.in_channels, self.input_dim)
         # x = x.transpose(1, 2).contiguous()
 
-        print("input dim : ", self.input_dim)
-        bsz, max_seq_len, _ = src.size()
-        src = src.view(bsz, max_seq_len, self.in_channels, self.input_dim)
-        src = src.transpose(1, 2).contiguous() # B C T F
+        src = src.unsqueeze(2)
+        src = src.transpose(1, 2).contiguous()
+        
+
+
+        # print("input dim : ", self.input_dim)
+        # bsz, max_seq_len, _ = src.size()
+        # src = src.view(bsz, max_seq_len, self.in_channels, self.input_dim)
+        # src = src.transpose(1, 2).contiguous() # B C T F
 
 
         # # Nếu src có 4 chiều (B, T, C, F), cần hoán vị lại
@@ -386,10 +391,12 @@ class VGGTransformerEncoderDecoder(nn.Module):
         # reshape the src vector to [Batch, Time, Fea] if a 4d vector is given
 
         
-
-        bsz, max_seq_len, _ = src.size()
-        src = src.view(bsz, max_seq_len, self.in_channels, self.input_dim)
-        src = src.transpose(1, 2).contiguous() # B C T F
+        src = src.unsqueeze(2)
+        print(src.shape)
+        src = src.transpose(1, 2).contiguous()
+        # bsz, max_seq_len, _ = src.size()
+        # src = src.view(bsz, max_seq_len, self.in_channels, self.input_dim)
+        # src = src.transpose(1, 2).contiguous() # B C T F
         
         for layer_idx, layer in enumerate(self.conv_layers_dec_enc):
             src = layer(src)
@@ -423,25 +430,24 @@ class VGGTransformerEncoderDecoder(nn.Module):
 # Cấu hình VGG Block Encoder
 vggblock_config_enc = [
     (64, 3, 2, 2, True),  # (out_channels, conv_kernel, pool_kernel, num_layers, layer_norm)
-    (64, 3, 2, 2, True)
+    (128, 3, 2, 2, True)
 ]
 
 # Cấu hình VGG Block Decoder
 vggblock_config_dec = [
-    (512, 3, True),
-    (512, 3, True)
+    (256, 3, True),
+    (256, 3, True)
 ]
 
 # Cấu hình Transformer
-input_size = 1280  # Số feature đầu vào sau VGG
-d_model = 512  # Số chiều của embedding trong Transformer
+input_size = 2560  # Số feature đầu vào sau VGG
+d_model = 256  # Số chiều của embedding trong Transformer
 num_decoder_layers = 6  # Số tầng Decoder
 tgt_vocab = 1000  # Giả định vocab có 1000 từ
-decoder_kdim = d_model  # Kích thước đầu vào của key
-decoder_vdim = d_model  # Kích thước đầu vào của value
 
 # Khởi tạo mô hình
 device = "cuda" if torch.cuda.is_available() else "cpu"
+print(device)
 model = VGGTransformerEncoderDecoder(
     input_feat_per_channel=80,
     vggblock_config_enc=vggblock_config_enc,  
@@ -463,8 +469,6 @@ model = VGGTransformerEncoderDecoder(
     layerdrop_prob=0.1,
     output_hidden_states=False,
     tgt_vocab=tgt_vocab,  
-    decoder_kdim=decoder_kdim,  
-    decoder_vdim=decoder_vdim  
 ).to(device)
 
 # ====== Dữ liệu giả lập mới ======
