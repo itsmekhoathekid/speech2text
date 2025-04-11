@@ -1,0 +1,37 @@
+training:
+  epochs: 100
+  batch_size: 1
+  save_path: "/home/anhkhoa/transformer_transducer/save_folder"
+  train_path : "/home/anhkhoa/transformer_transducer/data/train.json"
+  dev_path : "/home/anhkhoa/transformer_transducer/data/dev.json"
+  test_path : "/home/anhkhoa/transformer_transducer/data/test.json"
+  vocab_path : "/home/anhkhoa/transformer_transducer/data/vocab.json"
+  
+
+
+optimizer:
+  name: Adam
+  lr: 0.001
+  weight_decay: 0.0001
+
+
+model:
+  in_features: 80
+  n_layers: 4
+  n_dec_layers: 2
+  d_model: 256
+  ff_size: 1024
+  h: 4
+  joint_size: 512
+  enc_left_size: 2
+  enc_right_size: 2
+  dec_left_size: 1
+  dec_right_size: 1
+  p_dropout: 0.1
+  model_name: "transformer_transducer"
+
+
+
+rnnt_loss:
+  blank: 0
+  reduction: "mean" 
