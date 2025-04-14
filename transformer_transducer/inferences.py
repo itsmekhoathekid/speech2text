@@ -1,202 +1,182 @@
-from typing import List, Optional, Tuple, Union
-
 import torch
-import torch.nn as nn
-from torch import Tensor
-from torch.nn.utils.rnn import pack_padded_sequence, pad_packed_sequence
+import torch.nn.functional as F
+from utils.dataset import Speech2Text, speech_collate_fn
+from models.model import TransformerTransducer
+import yaml
+import os
+import argparse
+from tqdm import tqdm
+from jiwer import wer, cer
 
-class MultiHeadAtt(nn.Module):
-    """A module that implements the multi-head attention mechanism described in
-    https://arxiv.org/abs/1706.03762.
+ENC_OUT_KEY = "encoder_out"
+SPEECH_IDX_KEY = "speech_idx"
+HIDDEN_STATE_KEY = "hidden_state"
+DECODER_OUT_KEY = "decoder_out"
+PREDS_KEY = "preds"
+PREV_HIDDEN_STATE_KEY = "prev_hidden_state"
 
-    Args:
-        d_model (int): The dimensionality of the model.
+def load_config(config_path: str) -> dict:
+    with open(config_path, 'r') as f:
+        return yaml.safe_load(f)
 
-        h (int): The number of heads to use in the attention mechanism.
+def load_model(config: dict, vocab_len: int, device: torch.device) -> TransformerTransducer:
+    checkpoint_path = os.path.join(
+        config['training']['save_path'],
+        f"transformer_transducer_epoch_1"
+    )
+    print(f"Loading checkpoint from: {checkpoint_path}")
+    model = TransformerTransducer(
+        in_features=config['model']['in_features'],
+        n_classes=vocab_len,
+        n_layers=config['model']['n_layers'],
+        n_dec_layers=config['model']['n_dec_layers'],
+        d_model=config['model']['d_model'],
+        ff_size=config['model']['ff_size'],
+        h=config['model']['h'],
+        joint_size=config['model']['joint_size'],
+        enc_left_size=config['model']['enc_left_size'],
+        enc_right_size=config['model']['enc_right_size'],
+        dec_left_size=config['model']['dec_left_size'],
+        dec_right_size=config['model']['dec_right_size'],
+        p_dropout=config['model']['p_dropout']
+    ).to(device)
+    checkpoint = torch.load(checkpoint_path, map_location=device)
+    model.load_state_dict(checkpoint['model_state_dict'])
+    model.eval()
+    return model
 
-        masking_value (float, optional): The value used for masking. Defaults
-        to -1e15.
-    """
+class TransducerPredictor:
+    def __init__(self, model, vocab, device, sos=1, eos=2, blank=4):
+        self.model = model
+        self.vocab = vocab
+        self.device = device
+        self.sos = sos
+        self.eos = eos
+        self.blank = blank
+        self.idx2token = {idx: token for token, idx in vocab.items()}
 
-    def __init__(self, d_model: int, h: int, masking_value: int = -1e15) -> None:
-        super().__init__()
-        self.h = h
-        self.dk = d_model // h
-        self.d_model = d_model
-        self.masking_value = masking_value
-        assert d_model % h == 0, ValueError
-        self.query_fc = nn.Linear(in_features=d_model, out_features=d_model)
-        self.key_fc = nn.Linear(in_features=d_model, out_features=d_model)
-        self.value_fc = nn.Linear(in_features=d_model, out_features=d_model)
-        self.softmax = nn.Softmax(dim=-1)
+    def model_predict_step(self, speech, speech_mask, state):
+        text = state[PREDS_KEY]
+        text_mask = torch.ones_like(text, dtype=torch.bool, device=self.device)
 
-    def _reshape(self, x: Tensor) -> List[Tensor]:
-        batch_size, max_len, _ = x.shape
-        x = x.view(batch_size, max_len, self.h, self.dk)
-        return x
+        if ENC_OUT_KEY not in state:
+            encoder_out, _ = self.model.encoder(speech, speech_mask)
+            encoder_out = self.model.audio_fc(encoder_out)
+            state[ENC_OUT_KEY] = encoder_out
+            state[SPEECH_IDX_KEY] = 0
+            state["step"] = 0  # add step tracking
 
-    def _mask(self, att: Tensor, key_mask: Tensor, query_mask: Tensor) -> Tensor:
-        key_max_len = key_mask.shape[-1]
-        query_max_len = query_mask.shape[-1]
-        key_mask = key_mask.repeat(1, query_max_len)
-        key_mask = key_mask.view(-1, query_max_len, key_max_len)
-        if query_mask.dim() != key_mask.dim():
-            query_mask = query_mask.unsqueeze(dim=-1)
-        mask = key_mask & query_mask
-        mask = mask.unsqueeze(dim=1)
-        return att.masked_fill(~mask, self.masking_value)
+        t_idx = state[SPEECH_IDX_KEY]
+        encoder_out = state[ENC_OUT_KEY][:, :t_idx + 1, :]
 
-    def perform_attention(
-        self,
-        key: Tensor,
-        query: Tensor,
-        value: Tensor,
-        key_mask: Optional[Tensor] = None,
-        query_mask: Optional[Tensor] = None,
-    ) -> Tensor:
-        """Performs multi-head attention by computing a weighted sum of the
-        values using queries and keys. The weights are computed as a softmax
-        over the dot products of the queries and keys for each attention head.
-        Optionally, attention can be masked using key and query masks.
+        decoder_out, _ = self.model.decoder(text, text_mask)
+        decoder_out = self.model.text_fc(decoder_out)
 
-        Args:
-            key (Tensor): The key input tensor of shape [B, M, d]
-
-            query (Tensor): The query of shape [B, M, d]
-
-            value (Tensor): Teh value tensor of shape [B, M, d]
-
-            key_mask (Tensor, optional): A boolean tensor of shape
-            [B, M] where True indicates that the corresponding key position
-            contains data, not padding, and should not be masked
-
-            query_mask (Tensor, optional): A boolean tensor of shape
-            [B, M] where True indicates that the corresponding query position
-            contains data, not padding, and should not be masked
-
-        Returns:
-            Tensor: The tensor of shape [B, M, d] resulting from the multi-head
-            attention computation.
-        """
-        key = self._reshape(key)  # B, M, h, dk
-        query = self._reshape(query)  # B, M, h, dk
-        value = self._reshape(value)  # B, M, h, dk
-        key = key.permute(0, 2, 3, 1)  # B, h, dk, M
-        query = query.permute(0, 2, 1, 3)  # B, h, M, dk
-        value = value.permute(0, 2, 1, 3)  # B, h, M, dk
-        att = torch.matmul(query, key)
-        if key_mask is not None and query_mask is not None:
-            att = self._mask(att=att, key_mask=key_mask, query_mask=query_mask)
-        att = self.softmax(att / self.d_model)
-        out = torch.matmul(att, value)
-        out = out.permute(0, 2, 1, 3)
-        out = out.contiguous()
-        out = out.view(out.shape[0], out.shape[1], -1)
-        return out
-
-    def forward(
-        self,
-        key: Tensor,
-        query: Tensor,
-        value: Tensor,
-        key_mask: Union[Tensor, None] = None,
-        query_mask: Union[Tensor, None] = None,
-    ) -> Tensor:
-        """passes the input to the multi-head attention by computing a weighted
-        sum of the values using queries and keys. The weights are computed as a softmax
-        over the dot products of the queries and keys for each attention head.
-        Optionally, attention can be masked using key and query masks.
-
-        Args:
-            key (Tensor): The key input tensor of shape [B, M, d]
-
-            query (Tensor): The query of shape [B, M, d]
-
-            value (Tensor): Teh value tensor of shape [B, M, d]
-
-            key_mask (Tensor, optional): A boolean tensor of shape
-            [B, M] where True indicates that the corresponding key position
-            contains data, not padding, and should not be masked
-
-            query_mask (Tensor, optional): A boolean tensor of shape
-            [B, M] where True indicates that the corresponding query position
-            contains data, not padding, and should not be masked
-
-        Returns:
-            Tensor: The tensor of shape [B, M, d] resulting from the multi-head
-            attention computation.
-        """
-        key = self.key_fc(key)
-        query = self.query_fc(query)
-        value = self.value_fc(value)
-        return self.perform_attention(
-            key=key, query=query, value=value, key_mask=key_mask, query_mask=query_mask
+        output = self.model._join(
+            encoder_out[:, -1:, :],
+            decoder_out[:, -1:, :]
         )
 
+        logits = output[:, 0, 0, :]
+        logits = F.log_softmax(logits, dim=-1)
 
-class TruncatedSelfAttention(MultiHeadAtt):
-    """Builds the truncated self attention module used
-    in https://arxiv.org/abs/1910.12977
+        # ✅ CHẶN BLANK TRONG BƯỚC ĐẦU TIÊN
+        if state["step"] == 0:
+            logits[:, self.blank] = -float("inf")
 
-    Args:
+        # print(torch.topk(logits[0], 5))  # debug
 
-        d_model (int): The model dimension.
+        next_token = torch.argmax(logits, dim=-1, keepdim=True)
 
-        h (int): The number of attention heads.
+        new_state = state.copy()
+        new_state[PREDS_KEY] = torch.cat([state[PREDS_KEY], next_token], dim=1)
+        new_state[SPEECH_IDX_KEY] = t_idx + 1
+        new_state["step"] = state["step"] + 1
+        return new_state
 
-        left_size (int): The size of the left window that each time step is
-        allowed to look at.
+    def predict(self, speech):
+        self.model.eval()
+        with torch.no_grad():
+            B = speech.size(0)
+            speech_mask = torch.ones(B, speech.size(1), dtype=torch.bool, device=self.device)
+            state = {
+                PREDS_KEY: torch.LongTensor([[self.sos]]).to(self.device),
+                SPEECH_IDX_KEY: 0,
+                HIDDEN_STATE_KEY: None
+            }
+            max_steps = 100
+            blank_count = 0
+            for _ in range(max_steps):
+                state = self.model_predict_step(speech, speech_mask, state)
+                last_pred = state[PREDS_KEY][0, -1].item()
 
-        right_size (int): The size of the right window that each time step is
-        allowed to look at.
+                if last_pred == self.blank:
+                    blank_count += 1
+                    if blank_count >= 5:
+                        break
+                else:
+                    blank_count = 0
 
-        masking_value (float): The attention masking value.
-    """
+                if last_pred == self.eos:
+                    state[PREDS_KEY] = state[PREDS_KEY][:, :-1]
+                    break
 
-    def __init__(
-        self,
-        d_model: int,
-        h: int,
-        left_size: int,
-        right_size: int,
-        masking_value: float = -1e15,
-    ) -> None:
-        super().__init__(d_model=d_model, h=h, masking_value=masking_value)
-        self.left_size = left_size
-        self.right_size = right_size
+            pred_ids = state[PREDS_KEY][0, 1:].tolist()
+            tokens = [self.idx2token.get(tid, "") for tid in pred_ids]
+            return " ".join(tokens)
 
-    def get_looking_ahead_mask(self, mask: Tensor) -> Tensor:
-        truncated_mask = truncate_attention_mask(mask, self.right_size, self.left_size)
-        return truncated_mask
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--config", type=str, required=True, help="Path to YAML config file")
+    args = parser.parse_args()
 
-    def _mask(self, att: Tensor, query_mask: Tensor, *args, **kwargs) -> Tensor:
-        query_mask = query_mask.unsqueeze(dim=1)
-        return att.masked_fill(~query_mask, self.masking_value)
+    config = load_config(args.config)
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    def forward(
-        self,
-        x: Tensor,
-        mask: Union[Tensor, None],
-    ) -> Tensor:
-        """Applies truncated masked multi-head self attention to the input.
+    test_dataset = Speech2Text(
+        json_path=config['training']['test_path'],
+        vocab_path=config['training']['vocab_path']
+    )
+    test_loader = torch.utils.data.DataLoader(
+        test_dataset,
+        batch_size=1,
+        shuffle=False,
+        collate_fn=speech_collate_fn
+    )
+    vocab = test_dataset.vocab.stoi
+    vocab_len = len(vocab)
 
-        Args:
+    model = load_model(config, vocab_len, device)
+    predictor = TransducerPredictor(model, vocab, device, sos=1, eos=2, blank=4)
 
-            x (Tensor): The input tensor of shape [B, M, d].
+    all_predictions = []
+    all_references = []
 
-            mask (Union[Tensor, None]): The mask tensor of the input of shape
-            [B, M] where True indicates that the corresponding input position
-            contains data not padding and therefore should not be masked.
-            If None, the function will act as a normal multi-head self attention.
+    for batch in tqdm(test_loader, desc="Inference"):
+        speech = batch["fbank"].to(device)
+        pred_transcription = predictor.predict(speech)
+        all_predictions.append(pred_transcription)
 
-        Returns:
+        ref_ids = batch["text"].squeeze(0).tolist()
+        idx2token = {idx: token for token, idx in vocab.items()}
+        ref_tokens = [idx2token.get(token, "") for token in ref_ids]
+        ref_transcription = " ".join(ref_tokens)
+        print("🔊", pred_transcription)
+        print("🎯", ref_transcription)
+        all_references.append(ref_transcription)
 
-            Tensor: The attention result tensor of shape [B, M, d].
+    wer_score = wer(all_references, all_predictions)
+    cer_score = cer(all_references, all_predictions)
 
-        """
-        query_mask = None
-        if mask is not None:
-            query_mask = self.get_looking_ahead_mask(mask=mask)
-        return super().forward(
-            key=x, query=x, value=x, key_mask=mask, query_mask=query_mask
-        )
+    print("\n----- Inference Results -----")
+    for i, (ref, pred) in enumerate(zip(all_references, all_predictions)):
+        print(f"Sample {i}:")
+        print(f"  Reference: {ref}")
+        print(f"  Prediction: {pred}")
+        print()
+
+    print(f"Average WER: {wer_score:.4f}")
+    print(f"Average CER: {cer_score:.4f}")
+
+if __name__ == "__main__":
+    main()

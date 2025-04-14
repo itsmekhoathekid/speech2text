@@ -21,7 +21,8 @@ def create_vocab(json_path):
         "<pad>": 0,
         "<s>": 1,
         "</s>": 2,
-        "<unk>": 3
+        "<unk>": 3,
+        "<blank>" : 4
     }
 
     for idx, item in data.items():
@@ -57,19 +58,14 @@ def process_data(data_path, vocab, default_data_path, save_path):
     print(f"Data saved to {save_path}")
 
 
-vocab = create_vocab("/mnt/c/Users/VIET HOANG - VTS/Desktop/data/train.json")
-save_data(vocab, "/home/anhkhoa/transformer_transducer/data/vocab.json")
-process_data("/mnt/c/Users/VIET HOANG - VTS/Desktop/data/train.json",
+vocab = create_vocab("workspace/speech2text/transformer_transducer/data/train.json")
+save_data(vocab, "workspace/speech2text/transformer_transducer/data/vocab.json")
+process_data("workspace/speech2text/transformer_transducer/data/train.json",
              vocab,
-             "/mnt/d/wav-voices/wav-voices",
-             "/home/anhkhoa/transformer_transducer/data/train.json")
+             "workspace/speech2text/transformer_transducer/data/voices",
+             "workspace/speech2text/transformer_transducer/data/train.json")
 
-process_data("/mnt/c/Users/VIET HOANG - VTS/Desktop/data/dev.json",
+process_data("workspace/speech2text/transformer_transducer/data/test.json",
              vocab,
-             "/mnt/d/wav-voices/wav-voices",
-             "/home/anhkhoa/transformer_transducer/data/dev.json")
-
-process_data("/mnt/c/Users/VIET HOANG - VTS/Desktop/data/test.json",
-             vocab,
-             "/mnt/d/wav-voices/wav-voices",
-             "/home/anhkhoa/transformer_transducer/data/test.json")
+             "workspace/speech2text/transformer_transducer/data/voices",
+             "workspace/speech2text/transformer_transducer/data/dev.json")
