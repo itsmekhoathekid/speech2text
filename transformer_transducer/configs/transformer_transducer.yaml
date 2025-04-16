@@ -6,7 +6,7 @@ training:
   dev_path : "/home/anhkhoa/transformer_transducer/data/dev.json"
   test_path : "/home/anhkhoa/transformer_transducer/data/test.json"
   vocab_path : "/home/anhkhoa/transformer_transducer/data/vocab.json"
-  reload: True
+  reload: False
   
 
 
@@ -18,16 +18,16 @@ optimizer:
 
 model:
   in_features: 80
-  n_layers: 4
+  n_layers: 18
   n_dec_layers: 2
-  d_model: 256
-  ff_size: 1024
-  h: 4
+  d_model: 512
+  ff_size: 2048
+  h: 8
   joint_size: 512
-  enc_left_size: 2
-  enc_right_size: 2
-  dec_left_size: 1
-  dec_right_size: 1
+  enc_left_size: 10
+  enc_right_size: 0
+  dec_left_size: 20
+  dec_right_size: 0
   p_dropout: 0.1
   model_name: "transformer_transducer"
 

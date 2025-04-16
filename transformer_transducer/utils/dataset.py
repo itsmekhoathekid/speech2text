@@ -35,6 +35,10 @@ class Vocab:
     def __len__(self):
         return len(self.vocab)
 
+
+
+
+
 class Speech2Text(Dataset):
     def __init__(self, json_path, vocab_path):
         super().__init__()
@@ -48,37 +52,30 @@ class Speech2Text(Dataset):
     def __len__(self):
         return len(self.data)
     
-    
-
-    def get_fbank(self, wav_path):
-        waveform, sr = torchaudio.load(wav_path)
-        waveform = waveform.squeeze(0)
-
-        pre_emphasis = 0.97
-        waveform = torch.cat((waveform[:1], waveform[1:] - pre_emphasis * waveform[:-1]))
-
-        mel_transform = T.MelSpectrogram(
-            sample_rate=sr,
-            n_fft=400,
-            hop_length=160,
-            n_mels=80,
-            power=2.0,
+    def get_fbank(self, waveform, sample_rate=16000):
+        mel_extractor = T.MelSpectrogram(
+            sample_rate=sample_rate,
+            n_fft=512,
+            win_length=int(0.032 * sample_rate),
+            hop_length=int(0.010 * sample_rate),
+            n_mels=80,  # ✨ để đúng với Conv1d(in_channels=80)
+            power=2.0
         )
-        mel_spec = mel_transform(waveform)
-        log_mel_spec = T.AmplitudeToDB(stype='power', top_db=80)(mel_spec)
 
-        # CMVN per sample (utterance-level)
-        mean = log_mel_spec.mean(dim=1, keepdim=True)
-        std = log_mel_spec.std(dim=1, keepdim=True)
-        normalized_log_mel_spec = (log_mel_spec - mean) / (std + 1e-5)
+        log_mel = mel_extractor(waveform.unsqueeze(0))
+        log_mel = torchaudio.functional.amplitude_to_DB(log_mel, multiplier=10.0, amin=1e-10, db_multiplier=0)
+        return log_mel.squeeze(0).transpose(0, 1)  # [T, 80]
 
-        return normalized_log_mel_spec
+    def extract_from_path(self, wave_path):
+        waveform, sr = torchaudio.load(wave_path)
+        waveform = waveform.squeeze(0)  # (channel,) -> (samples,)
+        return self.get_fbank(waveform, sample_rate=sr)
 
     def __getitem__(self, idx):
         current_item = self.data[idx]
         wav_path = current_item["wav_path"]
         encoded_text = torch.tensor([self.sos_token] + current_item["encoded_text"], dtype=torch.long)
-        fbank = self.get_fbank(wav_path).transpose(0, 1).float()  # [T, 80]
+        fbank = self.extract_from_path(wav_path).float()  # [T, 80]
 
         return {
             "text": encoded_text,        # [T_text]
