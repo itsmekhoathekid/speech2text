@@ -22,7 +22,7 @@ def load_config(config_path: str) -> dict:
 def load_model(config: dict, vocab_len: int, device: torch.device) -> TransformerTransducer:
     checkpoint_path = os.path.join(
         config['training']['save_path'],
-        f"transformer_transducer_epoch_1"
+        f"transformer_transducer_epoch_19"
     )
     print(f"Loading checkpoint from: {checkpoint_path}")
     model = TransformerTransducer(
@@ -55,74 +55,69 @@ class TransducerPredictor:
         self.blank = blank
         self.idx2token = {idx: token for token, idx in vocab.items()}
 
-    def model_predict_step(self, speech, speech_mask, state):
-        text = state[PREDS_KEY]
-        text_mask = torch.ones_like(text, dtype=torch.bool, device=self.device)
-
-        if ENC_OUT_KEY not in state:
-            encoder_out, _ = self.model.encoder(speech, speech_mask)
-            encoder_out = self.model.audio_fc(encoder_out)
-            state[ENC_OUT_KEY] = encoder_out
-            state[SPEECH_IDX_KEY] = 0
-            state["step"] = 0  # add step tracking
-
-        t_idx = state[SPEECH_IDX_KEY]
-        encoder_out = state[ENC_OUT_KEY][:, :t_idx + 1, :]
-
-        decoder_out, _ = self.model.decoder(text, text_mask)
-        decoder_out = self.model.text_fc(decoder_out)
-
-        output = self.model._join(
-            encoder_out[:, -1:, :],
-            decoder_out[:, -1:, :]
-        )
-
-        logits = output[:, 0, 0, :]
-        logits = F.log_softmax(logits, dim=-1)
-
-        # ✅ CHẶN BLANK TRONG BƯỚC ĐẦU TIÊN
-        if state["step"] == 0:
-            logits[:, self.blank] = -float("inf")
-
-        # print(torch.topk(logits[0], 5))  # debug
-
-        next_token = torch.argmax(logits, dim=-1, keepdim=True)
-
-        new_state = state.copy()
-        new_state[PREDS_KEY] = torch.cat([state[PREDS_KEY], next_token], dim=1)
-        new_state[SPEECH_IDX_KEY] = t_idx + 1
-        new_state["step"] = state["step"] + 1
-        return new_state
-
-    def predict(self, speech):
+    def beam_search(self, speech, beam_width=5):
         self.model.eval()
         with torch.no_grad():
-            B = speech.size(0)
-            speech_mask = torch.ones(B, speech.size(1), dtype=torch.bool, device=self.device)
-            state = {
-                PREDS_KEY: torch.LongTensor([[self.sos]]).to(self.device),
-                SPEECH_IDX_KEY: 0,
-                HIDDEN_STATE_KEY: None
-            }
-            max_steps = 100
-            blank_count = 0
-            for _ in range(max_steps):
-                state = self.model_predict_step(speech, speech_mask, state)
-                last_pred = state[PREDS_KEY][0, -1].item()
+            speech_mask = torch.ones(speech.size(0), speech.size(1), dtype=torch.bool, device=self.device)
+            encoder_out, _ = self.model.encoder(speech, speech_mask)  # (1, T, D)
 
-                if last_pred == self.blank:
-                    blank_count += 1
-                    if blank_count >= 5:
-                        break
-                else:
-                    blank_count = 0
+            beam = [{
+                "tokens": [self.sos],
+                "log_prob": 0.0,
+                "state": None
+            }]
+            completed_hypotheses = []
+            T = encoder_out.size(1)
 
-                if last_pred == self.eos:
-                    state[PREDS_KEY] = state[PREDS_KEY][:, :-1]
-                    break
+            for t in range(T):
+                new_beam = []
+                for hyp in beam:
+                    prev_tokens = torch.LongTensor(hyp["tokens"]).unsqueeze(0).to(self.device)
+                    decoder_mask = torch.ones_like(prev_tokens, dtype=torch.bool, device=self.device)
+                    decoder_out, _ = self.model.decoder(prev_tokens, decoder_mask)
+                    decoder_out = decoder_out[:, -1:, :]  # (1, 1, D)
 
-            pred_ids = state[PREDS_KEY][0, 1:].tolist()
-            tokens = [self.idx2token.get(tid, "") for tid in pred_ids]
+                    enc_out_t = encoder_out[:, t:t+1, :]
+                    enc_out_t = self.model.audio_fc(enc_out_t)
+                    dec_out_t = self.model.text_fc(decoder_out)
+                    joint_out = self.model._join(enc_out_t, dec_out_t)
+                    log_probs = F.log_softmax(joint_out.squeeze(1), dim=-1).squeeze(0)  # (vocab_size,) hoặc (1, vocab_size)
+                    log_probs = log_probs.view(-1)  # đảm bảo đúng shape (vocab_size,)
+
+                    topk_log_probs, topk_ids = torch.topk(log_probs, beam_width)
+                    topk_log_probs = topk_log_probs.tolist()
+                    topk_ids = topk_ids.tolist()
+
+                    for i in range(beam_width):
+                        new_token = topk_ids[i]
+                        new_log_prob = hyp["log_prob"] + topk_log_probs[i]
+                        new_tokens = hyp["tokens"] + [new_token]
+
+                        if new_token == self.eos:
+                            completed_hypotheses.append({
+                                "tokens": new_tokens[1:-1],
+                                "log_prob": new_log_prob
+                            })
+                        elif new_token == self.blank:
+                            new_beam.append({
+                                "tokens": hyp["tokens"],
+                                "log_prob": new_log_prob,
+                                "state": hyp["state"]
+                            })
+                        else:
+                            new_beam.append({
+                                "tokens": new_tokens,
+                                "log_prob": new_log_prob,
+                                "state": hyp["state"]
+                            })
+
+                beam = sorted(new_beam, key=lambda x: x["log_prob"], reverse=True)[:beam_width]
+
+            if not completed_hypotheses:
+                completed_hypotheses = beam
+
+            best_hyp = max(completed_hypotheses, key=lambda x: x["log_prob"])
+            tokens = [self.idx2token.get(t, "") for t in best_hyp["tokens"]]
             return " ".join(tokens)
 
 def main():
@@ -154,7 +149,7 @@ def main():
 
     for batch in tqdm(test_loader, desc="Inference"):
         speech = batch["fbank"].to(device)
-        pred_transcription = predictor.predict(speech)
+        pred_transcription = predictor.beam_search(speech, beam_width=5)
         all_predictions.append(pred_transcription)
 
         ref_ids = batch["text"].squeeze(0).tolist()

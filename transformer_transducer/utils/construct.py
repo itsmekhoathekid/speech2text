@@ -58,14 +58,16 @@ def process_data(data_path, vocab, default_data_path, save_path):
     print(f"Data saved to {save_path}")
 
 
-vocab = create_vocab("workspace/speech2text/transformer_transducer/data/train.json")
-save_data(vocab, "workspace/speech2text/transformer_transducer/data/vocab.json")
-process_data("workspace/speech2text/transformer_transducer/data/train.json",
-             vocab,
-             "workspace/speech2text/transformer_transducer/data/voices",
-             "workspace/speech2text/transformer_transducer/data/train.json")
+vocab = create_vocab("/mnt/c/Users/VIET HOANG - VTS/Downloads/archive (2)/train.json")
+save_data(vocab, "/home/anhkhoa/transformer_transducer/data/vocab.json")
 
-process_data("workspace/speech2text/transformer_transducer/data/test.json",
+process_data("/mnt/c/Users/VIET HOANG - VTS/Downloads/archive (2)/train.json",
              vocab,
-             "workspace/speech2text/transformer_transducer/data/voices",
-             "workspace/speech2text/transformer_transducer/data/dev.json")
+             "/mnt/d/voices/voices",
+             "/home/anhkhoa/transformer_transducer/data/train.json")
+
+process_data("/mnt/c/Users/VIET HOANG - VTS/Downloads/archive (2)/test.json",
+             vocab,
+             "/mnt/d/voices/voices",
+             "/home/anhkhoa/transformer_transducer/data/dev.json")
+

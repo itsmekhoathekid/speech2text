@@ -1,11 +1,12 @@
 training:
-  epochs: 20
-  batch_size: 2
-  save_path: "workspace/speech2text/transformer_transducer/save_folder_new"
-  train_path : "workspace/speech2text/transformer_transducer/data/train.json"
-  dev_path : "workspace/speech2text/transformer_transducer/data/dev.json"
-  test_path : "workspace/speech2text/transformer_transducer/data/dev.json"
-  vocab_path : "workspace/speech2text/transformer_transducer/data/vocab.json"
+  epochs: 100
+  batch_size: 1
+  save_path: "/home/anhkhoa/transformer_transducer/save_folder_new"
+  train_path : "/home/anhkhoa/transformer_transducer/data/train.json"
+  dev_path : "/home/anhkhoa/transformer_transducer/data/dev.json"
+  test_path : "/home/anhkhoa/transformer_transducer/data/test.json"
+  vocab_path : "/home/anhkhoa/transformer_transducer/data/vocab.json"
+  reload: True
   
 
 
@@ -35,3 +36,5 @@ model:
 rnnt_loss:
   blank: 4
   reduction: "mean" 
+
+

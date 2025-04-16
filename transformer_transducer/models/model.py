@@ -107,7 +107,7 @@ class TransformerTransducer(nn.Module):
         result = self.tanh(result)
         result = self.join_net(result)
         return result
-
+    
     def forward(
         self,
         speech: Tensor,
