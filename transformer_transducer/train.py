@@ -29,24 +29,6 @@ def reload_model(model, optimizer, checkpoint_path):
     
     return past_epoch+1, model, optimizer
 
-def greedy_decode(output):
-    """
-    Greedy decoding cho tensor shape (B, T, U, V)
-    """
-    pred_ids = torch.argmax(output, dim=-1)  # (B, T, U)
-    return pred_ids[:, 0, :]  # lấy theo T=0 thôi cho đơn giản (hoặc chọn max logit theo U nào bạn cần)
-
-def calculate_accuracy(output, text_len, text, speech):
-    with torch.no_grad():
-        decoded = greedy_decode(output)  # shape: (B, U)
-        for i in range(speech.size(0)):
-            target_len = text_len[i].item()
-            target = text[i][:target_len]
-            pred = decoded[i][:target_len]
-
-            correct = (pred == target).sum().item()
-            acc = correct / target_len
-            print(f"🎯 Accuracy (sample {i}): {acc:.2%} ({correct}/{target_len})")
 
 def train_one_epoch(model, dataloader, optimizer, criterion, device):
     model.train()
@@ -56,24 +38,24 @@ def train_one_epoch(model, dataloader, optimizer, criterion, device):
 
     for batch_idx, batch in enumerate(progress_bar):
         speech = batch["fbank"].to(device)
-        text = batch["text"].to(device)
+        target_text = batch["text"].to(device)
         speech_mask = batch["fbank_mask"].to(device)
         text_mask = batch["text_mask"].to(device)
         fbank_len = batch["fbank_len"].to(device)
         text_len = batch["text_len"].to(device)
+        decoder_input = batch["decoder_input"].to(device)
 
         optimizer.zero_grad()
 
-        output, _, _ = model(
+        output, fbank_len, text_len = model(
             speech=speech,
             speech_mask=speech_mask,
-            text=text,
+            text=decoder_input,
             text_mask=text_mask,
         )
         
-        calculate_accuracy(output, text_len, text, speech)  # Tính accuracy cho từng sample
         # Bỏ <s> ở đầu nếu có
-        loss = criterion(output, text, fbank_len, text_len)
+        loss = criterion(output, target_text, fbank_len, text_len)
         loss.backward()
         optimizer.step()
 
@@ -98,20 +80,25 @@ def evaluate(model, dataloader, criterion, device):
     with torch.no_grad():
         for batch in progress_bar:
             speech = batch["fbank"].to(device)
-            text = batch["text"].to(device)
+            target_text = batch["text"].to(device)
             speech_mask = batch["fbank_mask"].to(device)
             text_mask = batch["text_mask"].to(device)
             fbank_len = batch["fbank_len"].to(device)
             text_len = batch["text_len"].to(device)
+            decoder_input = batch["decoder_input"].to(device)
 
-            output, _, _ = model(
+
+
+            output, fbank_len, text_len = model(
                 speech=speech,
                 speech_mask=speech_mask,
-                text=text,
+                text=decoder_input,
                 text_mask=text_mask,
             )
+            
+            # Bỏ <s> ở đầu nếu có
+            loss = criterion(output, target_text, fbank_len, text_len)
 
-            loss = criterion(output, text, fbank_len, text_len)
             total_loss += loss.item()
             progress_bar.set_postfix(batch_loss=loss.item())
 
