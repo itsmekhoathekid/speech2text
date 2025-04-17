@@ -1,2 +1,0 @@
-/data/npl/Speech2Text/RNN-Transducer/label,csv/RNN-T_mobile_2.yaml
-학습 시작
