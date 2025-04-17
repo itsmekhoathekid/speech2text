@@ -1,0 +1,175 @@
+import torch
+from utils.dataset import Speech2Text, speech_collate_fn
+from models.model import Transducer
+from tqdm import tqdm
+from models.loss import RNNTLoss
+import argparse
+import yaml
+import os 
+from models.optim import Optimizer
+
+
+
+def reload_model(model, optimizer, checkpoint_path, model_name):
+    """
+    Reload model and optimizer state from a checkpoint.
+    """
+    past_epoch = 0
+    path_list = [path for path in os.listdir(checkpoint_path)]
+    if len(path_list) > 0:
+        for path in path_list:
+            past_epoch = max(int(path.split("_")[-1]), past_epoch)
+        
+        load_path = os.path.join(checkpoint_path, f"{model_name}_{past_epoch}")
+        checkpoint = torch.load(load_path)
+        model.load_state_dict(checkpoint['model_state_dict'])
+        optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+    else:
+        print("No checkpoint found. Starting from scratch.")
+    
+    return past_epoch+1, model, optimizer
+
+
+def train_one_epoch(model, dataloader, optimizer, criterion, device):
+    model.train()
+    total_loss = 0.0
+
+    progress_bar = tqdm(dataloader, desc="🔁 Training", leave=False)
+
+    for batch_idx, batch in enumerate(progress_bar):
+        speech = batch["fbank"].to(device)
+        text = batch["text"].to(device)
+        speech_mask = batch["fbank_mask"].to(device)
+        text_mask = batch["text_mask"].to(device)
+        fbank_len = batch["fbank_len"].to(device)
+        text_len = batch["text_len"].to(device)
+
+        optimizer.zero_grad()
+
+        output, loss = model(speech, fbank_len.long(), text.int(), text_len.long())
+        
+        # Bỏ <s> ở đầu nếu có
+        # loss = criterion(output, text, fbank_len, text_len)
+        loss.backward()
+        optimizer.step()
+
+        total_loss += loss.item()
+
+        # === In loss từng batch ===
+        progress_bar.set_postfix(batch_loss=loss.item())
+
+    avg_loss = total_loss / len(dataloader)
+    print(f"✅ Average training loss: {avg_loss:.4f}")
+    return avg_loss
+
+
+from torchaudio.functional import rnnt_loss
+
+def evaluate(model, dataloader, criterion, device):
+    model.eval()
+    total_loss = 0.0
+
+    progress_bar = tqdm(dataloader, desc="🧪 Evaluating", leave=False)
+
+    with torch.no_grad():
+        for batch in progress_bar:
+            speech = batch["fbank"].to(device)
+            text = batch["text"].to(device)
+            speech_mask = batch["fbank_mask"].to(device)
+            text_mask = batch["text_mask"].to(device)
+            fbank_len = batch["fbank_len"].to(device)
+            text_len = batch["text_len"].to(device)
+
+            output, loss = model(speech, fbank_len.cpu().long(), text.int(), text_len.int())
+
+            # loss = criterion(output, text, fbank_len, text_len)
+            total_loss += loss.item()
+            progress_bar.set_postfix(batch_loss=loss.item())
+
+    avg_loss = total_loss / len(dataloader)
+    print(f"✅ Average validation loss: {avg_loss:.4f}")
+    return avg_loss
+
+def load_config(config_path):
+    with open(config_path, 'r') as f:
+        return yaml.safe_load(f)
+        
+def main():
+    from torch.optim import Adam
+    
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--config", type=str, required=True, help="Path to YAML config file")
+    args = parser.parse_args()
+
+    config = load_config(args.config)
+
+    training_cfg = config['training']
+
+
+
+    # ==== Load Dataset ====
+    train_dataset = Speech2Text(
+        json_path=training_cfg['train_path'],
+        vocab_path=training_cfg['vocab_path'],
+    )
+
+    train_loader = torch.utils.data.DataLoader(
+        train_dataset,
+        batch_size= training_cfg['batch_size'],
+        shuffle=True,
+        collate_fn = speech_collate_fn
+    )
+
+    dev_dataset = Speech2Text(
+        json_path=training_cfg['dev_path'],
+        vocab_path=training_cfg['vocab_path']
+    )
+
+    dev_loader = torch.utils.data.DataLoader(
+        dev_dataset,
+        batch_size= training_cfg['batch_size'],
+        shuffle=True,
+        collate_fn = speech_collate_fn
+    )
+    model = Transducer(config['model'])
+
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    model.to(device)
+
+    # === Khởi tạo loss ===
+    # Giả sử <blank> = 0, và bạn chưa dùng reduction 'mean' toàn bộ batch
+    criterion = RNNTLoss(config["rnnt_loss"]["blank"] , config["rnnt_loss"]["reduction"])  # hoặc "sum" nếu bạn custom average
+
+    # === Optimizer ===
+    optimizer = Optimizer(model.parameters(), config['optim'])
+
+    # === Huấn luyện ===
+
+    start_epoch = 1
+    if config['training']['reload']:
+        checkpoint_path = config['training']['save_path']
+        start_epoch, model, optimizer = reload_model(model, optimizer, checkpoint_path, config['model']['name'])
+    num_epochs = config["training"]["epochs"]
+
+    
+    for epoch in range(start_epoch, num_epochs + 1):
+        train_loss = train_one_epoch(model, train_loader, optimizer, criterion, device)
+        val_loss = evaluate(model,  dev_loader, criterion, device)
+
+        print(f"📘 Epoch {epoch}: Train Loss = {train_loss:.4f}, Val Loss = {val_loss:.4f}")
+        # Save model checkpoint
+
+        model_filename = os.path.join(
+            config['training']['save_path'],
+            f"transformer_transducer_epoch_{epoch}"
+        )
+
+        torch.save({
+            'epoch': epoch,
+            'model_state_dict': model.state_dict(),
+            'optimizer_state_dict': optimizer.state_dict(),
+        }, model_filename)
+
+
+if __name__ == "__main__":
+    main()
