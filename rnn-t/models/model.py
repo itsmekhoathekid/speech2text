@@ -75,9 +75,9 @@ class Transducer(nn.Module):
         # Joint network
         logits = self.joint(enc_state, dec_state)
 
-        # Loss
-        loss = self.crit(logits, targets.int(), inputs_length.int(), targets_length.int())
-        return logits, loss
+        # # Loss
+        # loss = self.crit(logits, targets.int(), inputs_length.int(), targets_length.int())
+        return logits
 
     def recognize(self, inputs, inputs_length):
         batch_size = inputs.size(0)
