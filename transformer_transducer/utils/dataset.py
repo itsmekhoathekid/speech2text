@@ -65,7 +65,7 @@ class Speech2Text(Dataset):
         log_mel = mel_extractor(waveform.unsqueeze(0))
         log_mel = torchaudio.functional.amplitude_to_DB(log_mel, multiplier=10.0, amin=1e-10, db_multiplier=0)
         return log_mel.squeeze(0).transpose(0, 1)  # [T, 80]
-
+    
     def extract_from_path(self, wave_path):
         waveform, sr = torchaudio.load(wave_path)
         waveform = waveform.squeeze(0)  # (channel,) -> (samples,)
@@ -74,14 +74,16 @@ class Speech2Text(Dataset):
     def __getitem__(self, idx):
         current_item = self.data[idx]
         wav_path = current_item["wav_path"]
-        encoded_text = torch.tensor([self.sos_token] + current_item["encoded_text"], dtype=torch.long)
+        encoded_text = torch.tensor(current_item["encoded_text"] + [self.eos_token], dtype=torch.long)
+        decoder_input = torch.tensor([self.sos_token] + current_item["encoded_text"], dtype=torch.long)
         fbank = self.extract_from_path(wav_path).float()  # [T, 80]
-
+        
         return {
             "text": encoded_text,        # [T_text]
             "fbank": fbank,              # [T_audio, 80]
             "text_len": len(encoded_text),
-            "fbank_len": fbank.shape[0]
+            "fbank_len": fbank.shape[0],
+            "decoder_input": decoder_input,  # [T_text + 1]
         }
     
 from torch.nn.utils.rnn import pad_sequence
@@ -92,11 +94,13 @@ def calculate_mask(lengths, max_len):
     return mask
 
 def speech_collate_fn(batch):
+    decoder_outputs = [torch.tensor(item["decoder_input"]) for item in batch]
     texts = [item["text"] for item in batch]
     fbanks = [item["fbank"] for item in batch]
     text_lens = torch.tensor([item["text_len"] for item in batch], dtype=torch.long)
     fbank_lens = torch.tensor([item["fbank_len"] for item in batch], dtype=torch.long)
 
+    padded_decoder_inputs = pad_sequence(decoder_outputs, batch_first=True, padding_value=0)
     padded_texts = pad_sequence(texts, batch_first=True, padding_value=0)       # [B, T_text]
     padded_fbanks = pad_sequence(fbanks, batch_first=True, padding_value=0.0)   # [B, T_audio, 80]
 
@@ -104,6 +108,7 @@ def speech_collate_fn(batch):
     text_mask=calculate_mask(text_lens, padded_texts.size(1))
 
     return {
+        "decoder_input": padded_decoder_inputs,
         "text": padded_texts,
         "text_mask": text_mask,
         "text_len" : text_lens,
