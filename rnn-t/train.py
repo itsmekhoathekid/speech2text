@@ -7,13 +7,10 @@ import argparse
 import yaml
 import os 
 from models.optim import Optimizer
-
+from torch.optim.lr_scheduler import ReduceLROnPlateau
 
 
 def reload_model(model, optimizer, checkpoint_path, model_name):
-    """
-    Reload model and optimizer state from a checkpoint.
-    """
     past_epoch = 0
     path_list = [path for path in os.listdir(checkpoint_path)]
     if len(path_list) > 0:
@@ -27,7 +24,7 @@ def reload_model(model, optimizer, checkpoint_path, model_name):
     else:
         print("No checkpoint found. Starting from scratch.")
     
-    return past_epoch+1, model, optimizer
+    return past_epoch + 1, model, optimizer
 
 
 def train_one_epoch(model, dataloader, optimizer, criterion, device):
@@ -36,9 +33,8 @@ def train_one_epoch(model, dataloader, optimizer, criterion, device):
 
     progress_bar = tqdm(dataloader, desc="🔁 Training", leave=False)
 
-    for batch_idx, batch in enumerate(progress_bar):
+    for batch in progress_bar:
         speech = batch["fbank"].to(device)
-        # text = batch["text"].to(device)
         speech_mask = batch["fbank_mask"].to(device)
         text_mask = batch["text_mask"].to(device)
         fbank_len = batch["fbank_len"].to(device)
@@ -47,25 +43,18 @@ def train_one_epoch(model, dataloader, optimizer, criterion, device):
         decoder_input = batch["decoder_input"].to(device)
 
         optimizer.zero_grad()
-        
         output = model(speech, fbank_len.long(), decoder_input.int(), text_len.long())
-        
-        # Bỏ <s> ở đầu nếu có
         loss = criterion(output, target_text, fbank_len, text_len)
         loss.backward()
         optimizer.step()
 
         total_loss += loss.item()
-
-        # === In loss từng batch ===
         progress_bar.set_postfix(batch_loss=loss.item())
 
     avg_loss = total_loss / len(dataloader)
     print(f"✅ Average training loss: {avg_loss:.4f}")
     return avg_loss
 
-
-from torchaudio.functional import rnnt_loss
 
 def evaluate(model, dataloader, criterion, device):
     model.eval()
@@ -84,11 +73,8 @@ def evaluate(model, dataloader, criterion, device):
             decoder_input = batch["decoder_input"].to(device)
 
             output = model(speech, fbank_len.long(), decoder_input.int(), text_len.long())
-
-            # Bỏ <s> ở đầu nếu có
             loss = criterion(output, target_text, fbank_len, text_len)
 
-            # loss = criterion(output, text, fbank_len, text_len)
             total_loss += loss.item()
             progress_bar.set_postfix(batch_loss=loss.item())
 
@@ -96,22 +82,19 @@ def evaluate(model, dataloader, criterion, device):
     print(f"✅ Average validation loss: {avg_loss:.4f}")
     return avg_loss
 
+
 def load_config(config_path):
     with open(config_path, 'r') as f:
         return yaml.safe_load(f)
-        
+
+
 def main():
-    from torch.optim import Adam
-    
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", type=str, required=True, help="Path to YAML config file")
     args = parser.parse_args()
 
     config = load_config(args.config)
-
     training_cfg = config['training']
-
-
 
     # ==== Load Dataset ====
     train_dataset = Speech2Text(
@@ -121,9 +104,9 @@ def main():
 
     train_loader = torch.utils.data.DataLoader(
         train_dataset,
-        batch_size= training_cfg['batch_size'],
+        batch_size=training_cfg['batch_size'],
         shuffle=True,
-        collate_fn = speech_collate_fn
+        collate_fn=speech_collate_fn
     )
 
     dev_dataset = Speech2Text(
@@ -133,41 +116,50 @@ def main():
 
     dev_loader = torch.utils.data.DataLoader(
         dev_dataset,
-        batch_size= training_cfg['batch_size'],
+        batch_size=training_cfg['batch_size'],
         shuffle=True,
-        collate_fn = speech_collate_fn
+        collate_fn=speech_collate_fn
     )
-    model = Transducer(config['model'])
 
+    # ==== Model ====
+    model = Transducer(config['model'])
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model.to(device)
 
-    # === Khởi tạo loss ===
-    # Giả sử <blank> = 0, và bạn chưa dùng reduction 'mean' toàn bộ batch
-    criterion = RNNTLoss(config["rnnt_loss"]["blank"] , config["rnnt_loss"]["reduction"])  # hoặc "sum" nếu bạn custom average
+    # ==== Loss ====
+    criterion = RNNTLoss(config["rnnt_loss"]["blank"], config["rnnt_loss"]["reduction"])
 
-    # === Optimizer ===
+    # ==== Optimizer ====
     optimizer = Optimizer(model.parameters(), config['optim'])
 
-    # === Huấn luyện ===
+    # ==== Scheduler ====
+    scheduler = ReduceLROnPlateau(
+        optimizer.optimizer,  # because you're using a wrapper class
+        mode='min',
+        factor=0.5,
+        patience=2,
+        verbose=True
+    )
 
+    # ==== Reload checkpoint if needed ====
     start_epoch = 1
-    if config['training']['reload']:
-        checkpoint_path = config['training']['save_path']
+    if training_cfg['reload']:
+        checkpoint_path = training_cfg['save_path']
         start_epoch, model, optimizer = reload_model(model, optimizer, checkpoint_path, config['model']['name'])
-    num_epochs = config["training"]["epochs"]
 
-    
+    # ==== Training loop ====
+    num_epochs = training_cfg["epochs"]
+
     for epoch in range(start_epoch, num_epochs + 1):
         train_loss = train_one_epoch(model, train_loader, optimizer, criterion, device)
-        val_loss = evaluate(model,  dev_loader, criterion, device)
+        val_loss = evaluate(model, dev_loader, criterion, device)
 
         print(f"📘 Epoch {epoch}: Train Loss = {train_loss:.4f}, Val Loss = {val_loss:.4f}")
-        # Save model checkpoint
 
+        # Save model checkpoint
         model_filename = os.path.join(
-            config['training']['save_path'],
-            f"transformer_transducer_epoch_{epoch}"
+            training_cfg['save_path'],
+            f"{config['model']['name']}_epoch_{epoch}"
         )
 
         torch.save({
@@ -175,6 +167,15 @@ def main():
             'model_state_dict': model.state_dict(),
             'optimizer_state_dict': optimizer.state_dict(),
         }, model_filename)
+
+        # Step scheduler with validation loss
+        scheduler.step(val_loss)
+
+        # Early stopping nếu lr quá nhỏ
+        current_lr = optimizer.optimizer.param_groups[0]["lr"]
+        if current_lr < 1e-6:
+            print('⚠️ Learning rate quá thấp. Kết thúc training.')
+            break
 
 
 if __name__ == "__main__":
