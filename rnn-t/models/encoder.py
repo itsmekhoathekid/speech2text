@@ -24,9 +24,13 @@ class BaseEncoder(nn.Module):
             output_size, bias=True
         )
 
+        self.input_bn = nn.BatchNorm1d(input_size)
+
     def forward(self, inputs, input_lengths):
         assert inputs.dim() == 3  # [B, T, F]
-        
+
+        B, T, F = inputs.shape
+        inputs = self.input_bn(inputs.view(-1, F)).view(B, T, F)
 
         if input_lengths is not None:
             sorted_seq_lengths, indices = torch.sort(input_lengths, descending=True)
