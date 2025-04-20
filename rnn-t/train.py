@@ -13,11 +13,15 @@ from torch.optim.lr_scheduler import ReduceLROnPlateau
 def reload_model(model, optimizer, checkpoint_path, model_name):
     past_epoch = 0
     path_list = [path for path in os.listdir(checkpoint_path)]
+    print(path_list)
     if len(path_list) > 0:
         for path in path_list:
-            past_epoch = max(int(path.split("_")[-1]), past_epoch)
+            try:
+                past_epoch = max(int(path.split("_")[-1]), past_epoch)
+            except:
+                continue
         
-        load_path = os.path.join(checkpoint_path, f"{model_name}_{past_epoch}")
+        load_path = os.path.join(checkpoint_path, f"{model_name}_epoch_{past_epoch}")
         checkpoint = torch.load(load_path)
         model.load_state_dict(checkpoint['model_state_dict'])
         optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
