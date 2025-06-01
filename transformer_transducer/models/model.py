@@ -128,7 +128,7 @@ class TransformerTransducer(nn.Module):
         """
         # Thêm blank token (0) đầu chuỗi
         blank = torch.zeros((targets.size(0), 1), device=targets.device).long()
-        decoder_input = torch.cat([blank, targets], dim=1)  # [B, N]
+        decoder_input = torch.cat([targets, blank], dim=1)  # [B, N]
         text_mask = torch.cat([torch.ones((targets.size(0), 1), device=targets.device).bool(), text_mask], dim=1)
         # Encoder
         speech_enc, speech_len = self.encoder(speech, speech_mask)
