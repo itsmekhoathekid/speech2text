@@ -5,6 +5,7 @@ import torch.nn as nn
 from torch import Tensor
 from torch.nn.utils.rnn import pack_padded_sequence, pad_packed_sequence
 from .encoder import TransformerTransducerLayer
+from .utils import add_pos_enc
 
 class TransformerTransducerDecoder(nn.Module):
     """Implements the Transformer-Transducer decoder with relative truncated
@@ -81,6 +82,7 @@ class TransformerTransducerDecoder(nn.Module):
         """
         lengths = mask.sum(dim=-1)
         out = self.emb(x)
+        out = add_pos_enc(out)
 
         for layer in self.enc_layers:
             out = layer(out, mask)

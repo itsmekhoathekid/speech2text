@@ -2,6 +2,7 @@ import torch
 from torch import Tensor
 import torch.nn as nn
 from typing import List, Optional, Tuple, Union
+import torch.nn.functional as F
 
 def get_mask_from_lens(lengths: Tensor, max_len: int) -> Tensor:
     """Creates a mask tensor from lengths tensor.
@@ -98,38 +99,22 @@ class AddAndNorm(nn.Module):
 
 
 class FeedForwardModule(nn.Module):
-    """Implements the feed-forward module of the transformer architecture as
-    described in the paper https://arxiv.org/abs/1706.03762
-
-    Args:
-        d_model (int): The model dimensionality.
-
-        ff_size (int): The dimensionality of the inner layer.
-    """
-
-    def __init__(self, d_model: int, ff_size: int, p_dropout: float = 0.0) -> None:
+    def __init__(self, d_model, ff_size, p_dropout=0.1):
         super().__init__()
-        self.fc1 = nn.Linear(in_features=d_model, out_features=ff_size)
-        self.relu = nn.ReLU()
-        self.fc2 = nn.Linear(in_features=ff_size, out_features=d_model)
+        self.layer_norm = nn.LayerNorm(d_model)
+        self.dense1 = nn.Linear(d_model, ff_size)
+        self.dense2 = nn.Linear(ff_size, d_model)
         self.dropout = nn.Dropout(p_dropout)
 
-    def forward(self, x: Tensor) -> Tensor:
-        """Passes the input to the layer
-
-        Args:
-            x (Tensor): The input tensor of shape [B, M, d]
-
-        Returns:
-            Tensor: The output tensor of shape [B, M, d] obtained after passing
-            through the layer.
-        """
-        out = self.fc1(x)
-        out = self.relu(out)
-        out = self.dropout(out)
-        out = self.fc2(out)
-        out = self.dropout(out)
-        return out
+    def forward(self, x):
+        residual = x
+        x = self.layer_norm(x)
+        x = self.dense1(x)
+        x = F.relu(x)
+        x = self.dropout(x)
+        x = self.dense2(x)
+        x = self.dropout(x)
+        return x + residual  # Residual connection
 
 class CausalVGGBlock(nn.Module):
     """Implements a causal VGG block consisting of causal 2D convolution layers,

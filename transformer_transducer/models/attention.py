@@ -35,7 +35,7 @@ class MultiHeadAtt(nn.Module):
         batch_size, max_len, _ = x.shape
         x = x.view(batch_size, max_len, self.h, self.dk)
         return x
-
+        
     def _mask(self, att: Tensor, key_mask: Tensor, query_mask: Tensor) -> Tensor:
         key_max_len = key_mask.shape[-1]
         query_max_len = query_mask.shape[-1]

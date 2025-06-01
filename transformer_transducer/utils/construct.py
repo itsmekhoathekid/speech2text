@@ -27,7 +27,7 @@ def create_vocab(json_path):
 
     for idx, item in data.items():
         text = normalize_transcript(item['script'])
-        for word in text.split(' '):
+        for word in text.strip():
             if word not in vocab:
                 vocab[word] = len(vocab)
     
@@ -48,7 +48,7 @@ def process_data(data_path, vocab, default_data_path, save_path):
         data_res = {}
         text = normalize_transcript(item['script'])
         unk_id = vocab["<unk>"]
-        tokens = [vocab.get(word, unk_id) for word in text.strip().split()]
+        tokens = [vocab.get(word, unk_id) for word in text.strip()]
         data_res['encoded_text'] = tokens
         data_res['text'] = text
         data_res['wav_path'] = os.path.join(default_data_path, item['voice'])
@@ -59,15 +59,15 @@ def process_data(data_path, vocab, default_data_path, save_path):
 
 
 vocab = create_vocab("/mnt/c/Users/VIET HOANG - VTS/Downloads/archive (2)/train.json")
-save_data(vocab, "/home/anhkhoa/transformer_transducer/data/vocab.json")
+save_data(vocab, "/home/anhkhoa/transformer_transducer/data/vocab_char.json")
 
 process_data("/mnt/c/Users/VIET HOANG - VTS/Downloads/archive (2)/train.json",
              vocab,
              "/mnt/d/voices/voices",
-             "/home/anhkhoa/transformer_transducer/data/train.json")
+             "/home/anhkhoa/transformer_transducer/data/train_char.json")
 
 process_data("/mnt/c/Users/VIET HOANG - VTS/Downloads/archive (2)/test.json",
              vocab,
              "/mnt/d/voices/voices",
-             "/home/anhkhoa/transformer_transducer/data/dev.json")
+             "/home/anhkhoa/transformer_transducer/data/dev_char.json")
 

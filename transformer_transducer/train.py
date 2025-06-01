@@ -50,10 +50,14 @@ def train_one_epoch(model, dataloader, optimizer, criterion, device):
         output, fbank_len, text_len = model(
             speech=speech,
             speech_mask=speech_mask,
-            text=decoder_input,
+            targets=decoder_input,
             text_mask=text_mask,
         )
         
+        logits = torch.argmax(output, dim=-1)  # [B, M, N]
+        print(f"Logits : {logits[:, 0]}")
+        print(f"Target : {target_text}")
+        raise
         # Bỏ <s> ở đầu nếu có
         loss = criterion(output, target_text, fbank_len, text_len)
         loss.backward()
@@ -92,7 +96,7 @@ def evaluate(model, dataloader, criterion, device):
             output, fbank_len, text_len = model(
                 speech=speech,
                 speech_mask=speech_mask,
-                text=decoder_input,
+                targets=decoder_input,
                 text_mask=text_mask,
             )
             
@@ -204,5 +208,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
-# 3

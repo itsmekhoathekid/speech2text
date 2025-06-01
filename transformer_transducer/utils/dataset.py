@@ -97,9 +97,9 @@ def speech_collate_fn(batch):
     decoder_outputs = [torch.tensor(item["decoder_input"]) for item in batch]
     texts = [item["text"] for item in batch]
     fbanks = [item["fbank"] for item in batch]
-    text_lens = torch.tensor([item["text_len"] for item in batch], dtype=torch.long)
+    text_lens = torch.tensor([len(item["decoder_input"]) for item in batch], dtype=torch.long)
     fbank_lens = torch.tensor([item["fbank_len"] for item in batch], dtype=torch.long)
-
+    
     padded_decoder_inputs = pad_sequence(decoder_outputs, batch_first=True, padding_value=0)
     padded_texts = pad_sequence(texts, batch_first=True, padding_value=0)       # [B, T_text]
     padded_fbanks = pad_sequence(fbanks, batch_first=True, padding_value=0.0)   # [B, T_audio, 80]

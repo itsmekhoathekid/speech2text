@@ -38,6 +38,13 @@ def train_one_epoch(model, dataloader, optimizer, criterion, device, predictor, 
 
         optimizer.zero_grad()
         output, _, _ = model(speech=speech, speech_mask=speech_mask, text=text, text_mask=text_mask)
+
+        # Bạn muốn xem token tại từng bước decoder U
+        blank_id = 4  # hoặc theo config bạn
+        preds = output.argmax(dim=-1)  # shape: (B, T, U)
+        blank_ratio = (preds == blank_id).float().mean().item()
+        print(f"🔍 Blank ratio: {blank_ratio:.2%}")
+        raise
         loss = criterion(output, text, fbank_len, text_len)
         loss.backward()
         optimizer.step()

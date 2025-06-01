@@ -17,19 +17,19 @@ optimizer:
 
 
 model:
-  in_features: 80
-  n_layers: 18
-  n_dec_layers: 2
-  d_model: 512
-  ff_size: 2048
-  h: 8
-  joint_size: 512
-  enc_left_size: 10
-  enc_right_size: 0
-  dec_left_size: 20
-  dec_right_size: 0
-  p_dropout: 0.1
-  model_name: "transformer_transducer"
+   in_features: 80
+   n_layers: 4
+   n_dec_layers: 2
+   d_model: 256
+   ff_size: 1024
+   h: 4
+   joint_size: 512
+   enc_left_size: 512
+   enc_right_size: 512
+   dec_left_size: 512
+   dec_right_size: 512
+   p_dropout: 0.1
+   model_name: "transformer_transducer"
 
 
 

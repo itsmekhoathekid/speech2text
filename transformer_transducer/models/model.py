@@ -112,35 +112,35 @@ class TransformerTransducer(nn.Module):
         self,
         speech: Tensor,
         speech_mask: Tensor,
-        text: Tensor,
+        targets: Tensor,  # Đổi tên text -> targets (không chứa SOS)
         text_mask: Tensor,
-        *args,
-        **kwargs
     ) -> Tuple[Tensor, Tensor, Tensor]:
-        """Passes the input to the model
+        """Forward pass với blank token đầu decoder input
 
         Args:
-
-            speech (Tensor): The input speech of shape [B, M, d]
-
-            speech_mask (Tensor): The speech mask of shape [B, M]
-
-            text (Tensor): The text input of shape [B, N]
-
-            text_mask (Tensor): The text mask of shape [B, N]
-
+            speech: [B, M, d]
+            speech_mask: [B, M]
+            targets: [B, N-1] (target không chứa SOS)
+            text_mask: [B, N]
+        
         Returns:
-            Tuple[Tensor, Tensor, Tensor]: A tuple of 3 tensors where the first
-            is the predictions of shape [B, M, N, C], the last two tensor are
-            the speech and text length of shape [B]
+            logits: [B, M, N, C]
         """
-        speech, speech_len = self.encoder(speech, speech_mask)
-        text, text_len = self.decoder(text, text_mask)
-        speech = self.audio_fc(speech)
-        text = self.text_fc(text)
-        result = self._join(encoder_out=speech, deocder_out=text)
-        speech_len, text_len = (
-            speech_len.to(speech.device),
-            text_len.to(speech.device),
-        )
-        return result, speech_len, text_len
+        # Thêm blank token (0) đầu chuỗi
+        blank = torch.zeros((targets.size(0), 1), device=targets.device).long()
+        decoder_input = torch.cat([blank, targets], dim=1)  # [B, N]
+        text_mask = torch.cat([torch.ones((targets.size(0), 1), device=targets.device).bool(), text_mask], dim=1)
+        # Encoder
+        speech_enc, speech_len = self.encoder(speech, speech_mask)
+        
+        # Decoder (dùng decoder_input đã thêm blank)
+        text_dec, text_len = self.decoder(decoder_input, text_mask)
+        
+        # Project features
+        speech_proj = self.audio_fc(speech_enc)
+        text_proj = self.text_fc(text_dec)
+        
+        # Joint network
+        logits = self._join(speech_proj, text_proj)
+        
+        return logits, speech_len, text_len

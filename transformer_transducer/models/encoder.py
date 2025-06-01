@@ -5,7 +5,7 @@ import torch.nn as nn
 from torch import Tensor
 from torch.nn.utils.rnn import pack_padded_sequence, pad_packed_sequence
 from .attention import MultiHeadAtt, TruncatedSelfAttention, TruncatedRelativeMHSA
-from .utils import AddAndNorm, FeedForwardModule, get_mask_from_lens, VGGTransformerPreNet, calc_data_len
+from .utils import AddAndNorm, FeedForwardModule, get_mask_from_lens, VGGTransformerPreNet, calc_data_len, add_pos_enc
 
 class TransformerEncLayer(nn.Module):
     """Implements a single layer of the transformer encoder model as
@@ -290,8 +290,8 @@ class TransformerTransducerLayer(nn.Module):
         """
         x = self.lnorm(x)
         out = self.mhsa(x, mask)
-        out = self.add_and_norm(x, out)
-        out = out + self.ff(out)
+        out = x + out
+        out = self.ff(out)
         out = self.dropout(out)
         return out
 
@@ -380,9 +380,15 @@ class TransformerTransducerEncoder(nn.Module):
             [B, M, F] and the second element is the lengths of shape [B].
         """
         lengths = mask.sum(dim=-1)
+        # print(out.shape)
         out = x.transpose(-1, -2)
+        # print(out.shape)
         out = self.pre_net(out)
+        # print(out.shape)
         out = out.transpose(-1, -2)
+
+        out = add_pos_enc(out)
+        # print(out.shape)
         lengths = calc_data_len(
             result_len=out.shape[1],
             pad_len=x.shape[1] - lengths,
